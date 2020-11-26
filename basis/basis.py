@@ -1,7 +1,5 @@
 from abc import ABC, abstractmethod
 import numpy as np
-from scipy.interpolate import splev
-from scipy.integrate import romb
 
 
 def default_knots(m, K, domain):
