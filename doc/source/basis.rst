@@ -13,3 +13,9 @@ Monomial
 .. autoclass:: basis.basis.Monomial
    :members:
    :show-inheritance:
+
+Exponential
+******************
+.. autoclass:: basis.basis.Exponential
+   :members:
+   :show-inheritance:

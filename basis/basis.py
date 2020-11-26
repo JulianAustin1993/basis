@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+
 import numpy as np
 
 
@@ -94,8 +95,8 @@ class Basis(ABC):
             q (int): The order of the derivative to take of the basis functions.
 
         Returns:
-            (np.ndarray): A :math:`n \times K` matrix with :math:`k^\text{th}` columns corresponding to the qth
-                derivative of the :math:`k^\text{th}` basis functions evaluated at locations `x` of length :math:`n`.
+            (np.ndarray): A :math:`n \\times K` matrix with :math:`k^\\text{th}` columns corresponding to the qth
+                derivative of the :math:`k^\\text{th}` basis functions evaluated at locations `x` of length :math:`n`.
 
         """
         raise NotImplementedError()
@@ -109,8 +110,8 @@ class Basis(ABC):
             q (int, Optional): The order of the derivative to take of the basis functions. Defaults to 0.
 
         Returns:
-            (np.ndarray): A :math:`n \times K` matrix with :math:`k^\text{th}` columns corresponding to the qth
-                derivative of the :math:`k^\text{th}` basis functions evaluated at locations `x` of length :math:`n`.
+            (np.ndarray): A :math:`n \\times K` matrix with :math:`k^\\text{th}` columns corresponding to the qth
+                derivative of the :math:`k^\\text{th}` basis functions evaluated at locations `x` of length :math:`n`.
 
         Raises:
             ValueError: If not all locations `x` lie in the domain of the basis system.
@@ -133,7 +134,7 @@ class Basis(ABC):
         .. math::
             p_{kl} = \int B_k^{(q)}(t) B_l^{(q)}(t)dt
 
-        where :math:`B_k` is the :math:`k^\text{th}` basis function.
+        where :math:`B_k` is the :math:`k^\\text{th}` basis function.
 
         Args:
             q (int): The order of the derivative of the penalty matrix.
@@ -141,7 +142,7 @@ class Basis(ABC):
             k (int, Optional): Number of samples for romberg integration calculated by :math:`2^k + 1`. Defaults to 12.
 
         Returns:
-            (np.ndarray): A :math:`K x K` matrix with elements given by :math:`p_{kl}`.
+            (np.ndarray): A :math:`K \\times K` matrix with elements given by :math:`p_{kl}`.
 
         """
         raise NotImplementedError()
@@ -185,8 +186,8 @@ class Monomial(Basis):
             q (int): The order of the derivative to take of the basis functions.
 
         Returns:
-            (np.ndarray): A :math:`n \times K` matrix with :math:`k^\text{th}` columns corresponding to the qth
-                derivative of the :math:`k^\text{th}` basis functions evaluated at locations `x` of length :math:`n`.
+            (np.ndarray): A :math:`n \\times K` matrix with :math:`k^\\text{th}` columns corresponding to the qth
+                derivative of the :math:`k^\\text{th}` basis functions evaluated at locations `x` of length :math:`n`.
 
         """
         deg = self.K
@@ -207,7 +208,7 @@ class Monomial(Basis):
         .. math::
             p_{kl} = \int B_k^{(q)}(t) B_l^{(q)}(t)dt
 
-        where :math:`B_k` is the :math:`k^\text{th}` basis function.
+        where :math:`B_k` is the :math:`k^\\text{th}` basis function.
 
         Args:
             q (int): The order of the derivative of the penalty matrix.
@@ -215,7 +216,7 @@ class Monomial(Basis):
             k (int, Optional): Number of samples for romberg integration calculated by :math:`2^k + 1`. Defaults to 12.
 
         Returns:
-            (np.ndarray): A :math:`K x K` matrix with elements given by :math:`p_{kl}`.
+            (np.ndarray): A :math:`K \\times K` matrix with elements given by :math:`p_{kl}`.
 
         """
         inner_product = np.zeros((self.K, self.K))
@@ -229,5 +230,122 @@ class Monomial(Basis):
                     jfac *= j - k + 1
                 ipow = i + j - 2 * q + 1
                 inner_product[i, j] = (self.domain[1] ** ipow - self.domain[0] ** ipow) * ifac * jfac / ipow
+                inner_product[j, i] = inner_product[i, j]
+        return inner_product
+
+
+class Exponential(Basis):
+    """Representation of the univariate exponential basis system.
+
+    Basis system is specified as the collection :math:`\{B_k\}_{k=1}^K` where:
+
+    .. math::
+        B_k(t) = e^{\\theta_k t}
+
+    where :math:`\\theta` is a :math:`K` length vector of rates.
+
+    Attributes:
+        domain (tuple):  The domain of the basis system specified by the lower and upper bound of the system.
+
+        K (int): Number of basis functions to use in the basis system.
+
+        theta (tuple): Rate parameters for each basis function.
+
+    """
+
+    def __init__(self, domain, K, theta=None):
+        """Inits the univariate exponential basis system.
+
+        Args:
+            domain (tuple):  The domain of the basis system specified by the lower and upper bound of the system.
+
+            K (int): Number of basis functions to use in the basis system.
+
+            theta (tuple, optional): Rate parameters for each basis function. Defaults to None.
+        """
+        super().__init__(domain, K)
+        if theta is not None:
+            if not (len(set(theta)) == len(theta) and len(theta) == self.K):
+                raise ValueError('theta must have unique values of length K')
+            self.theta = theta
+        else:
+            self.theta = tuple(np.arange(self.K))
+
+    @property
+    def theta(self):
+        """Getter for the theta attribute
+
+        """
+        return self.__theta
+
+    @theta.setter
+    def theta(self, theta):
+        """Setter for the theta attribute.
+
+        Args:
+            theta (tuple): Rate vector for the basis system. Must be of length K and have all unique elements.
+
+        Raises:
+             ValueError if theta is not of length K and contains only unique elements.
+
+        """
+        if not (len(set(theta)) == len(theta) and len(theta) == self.K):
+            raise ValueError('theta must have unique values of length K')
+        self.__theta = theta
+
+    def _evaluate_basis(self, x, q):
+        """Evaluate the qth derivative of all basis functions at locations x for the Exponential basis system.
+
+        The qth derivative of basis function :math:`B_k(t)` is given by:
+        .. math:
+            \frac{d^{(q)}B_k(t)}{dt} = \\theta^q B_k(t)
+
+        Args:
+            x (np.ndarray): Locations to evaluate basis function at.
+
+            q (int): The order of the derivative to take of the basis functions.
+
+        Returns:
+            (np.ndarray): A :math:`n \\times K` matrix with :math:`k^\\text{th}` columns corresponding to the qth
+                derivative of the :math:`k^\\text{th}` basis functions evaluated at locations `x` of length :math:`n`.
+
+        """
+        expon_vecs = np.exp(np.outer(x, self.theta))
+        return np.power(self.theta, q) * expon_vecs if q != 0 else expon_vecs
+
+    def penalty(self, q, k=12):
+        """Calculate the qth order penalty matrix for the basis system.
+
+        The form of the penalty matrix is given by:
+
+        .. math::
+            P = [p_{kl}]
+
+        .. math::
+            p_{kl} = \int B_k^{(q)}(t) B_l^{(q)}(t)dt
+
+        where :math:`B_k` is the :math:`k^\\text{th}` basis function.
+
+        Args:
+            q (int): The order of the derivative of the penalty matrix.
+
+            k (int, Optional): Number of samples for romberg integration calculated by :math:`2^k + 1`. Defaults to 12.
+
+        Returns:
+            (np.ndarray): A :math:`K \\times K` matrix with elements given by :math:`p_{kl}`.
+
+        """
+        inner_product = np.zeros((self.K, self.K))
+        for i in np.arange(1, self.K):
+            for j in np.arange(i, self.K):
+                rate_i = self.theta[i]
+                rate_j = self.theta[j]
+                rate_sum = rate_i + rate_j
+                if rate_sum != 0:
+                    inner_product[i, j] = (((rate_i * rate_j) ** q) / rate_sum) * (
+                            np.exp(rate_sum * self.domain[1]) - np.exp(rate_sum * self.domain[0]))
+                else:
+                    if q == 0:
+                        inner_product[i, j] = np.diff(self.domain)
                 inner_product[j, i] = inner_product[i, j]
         return inner_product
