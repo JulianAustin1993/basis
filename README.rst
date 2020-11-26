@@ -1,7 +1,7 @@
 Basis
 =====
 Basis is a package for building univariate basis systems in python. The package is heavily based on the basis functions
-in the R_ package fda_. As such the package is highly influenced by the monograph Functional Data Analysis, [1].
+in the R_ package fda_. As such the package is highly influenced by the monograph ``Functional Data Analysis``, [1].
 
 
 What does Basis do?
