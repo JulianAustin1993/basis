@@ -25,3 +25,10 @@ Fourier
 .. autoclass:: basis.basis.Fourier
    :members:
    :show-inheritance:
+
+Bspline
+******************
+.. autoclass:: basis.basis.Bspline
+   :members:
+   :show-inheritance:
+

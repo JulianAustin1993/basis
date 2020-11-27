@@ -2,25 +2,7 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 from scipy.integrate import romb
-
-
-def default_knots(m, K, domain):
-    """Calculate default knot placement for B-spline basis system with `N` basis functions of order `m` across `domain`.
-
-    Args:
-        m (int): The order of B-spline functions.
-
-        K (int): The number of basis functions in the basis system.
-
-        domain (tuple): The domain over which to place the knots specified by the lower and upper bound of the system.
-
-    Returns:
-        (np.ndarray): The full knot vector of the B-spline basis system.
-
-    """
-    L = K - m
-    tau = np.linspace(*domain, L + 2)
-    return np.pad(tau, (m - 2, m - 2), 'edge')
+from scipy.interpolate import splev
 
 
 class Basis(ABC):
@@ -487,3 +469,162 @@ class Fourier(Basis):
             inner_prod_diag[index_o] = fac
             inner_product = np.diag(inner_prod_diag * 2 / self.period)
         return inner_product
+
+
+class Bspline(Basis):
+    """Representation of the univariate fourier basis system.
+
+    Basis system is specified as the collection :math:`\{B_k,\}_{k=1}^K` where :math:`B_k` is the order :math:`m`
+    B-spline function with knot vector :math:`\\tau`.
+
+    Attributes:
+        domain (tuple):  The domain of the basis system specified by the lower and upper bound of the system.
+
+        K (int): Number of basis functions to use in the basis system.
+
+        order (int): The order of the Bspline basis functions.
+
+        knots (tuple): The full knot vector for the Bspline basis functions.
+
+    """
+
+    def __init__(self, domain, K, order, knots=None):
+        """Init the Bspline basis system.
+
+        Args:
+            domain (tuple):  The domain of the basis system specified by the lower and upper bound of the system.
+
+            K (int): Number of basis functions to use in the basis system.
+
+            order (int): The order of the Bspline basis functions.
+
+            knots (tuple, Optional): The full knot vector for the Bspline basis functions. Defaults to linearly spaced
+                knots over the domain.
+
+        """
+        super().__init__(domain, K)
+        self.order = order
+        self.knots = knots
+
+    @property
+    def order(self):
+        """Getter for the order property.
+
+        """
+        return self.__order
+
+    @order.setter
+    def order(self, order):
+        """Setter for the order attribute.
+
+        Args:
+            order (int): The order of the B-spline basis functions.
+
+        """
+        self.__order = int(order)
+
+    @property
+    def knots(self):
+        """Getter for knots property.
+
+        """
+        return self.__knots
+
+    @knots.setter
+    def knots(self, knots):
+        """Setter for knots property
+
+        Raises:
+            ValueError: If knot vector not of correct length.
+        """
+        if knots is not None and len(knots) != self.K + 1 - self.order:
+            raise ValueError("Knot vector isn't correct length")
+        self.__knots = knots if knots is not None else self.default_knots()
+
+    def default_knots(self):
+        """Calculate default knot placement for B-spline basis system.
+
+        Returns:
+            (np.ndarray): The full knot vector of the B-spline basis system.
+
+        """
+        L = self.K - self.order
+        tau = np.linspace(*self.domain, L + 2)
+        return np.pad(tau, (self.order - 1, self.order - 1), 'edge')
+
+    def _bspline_basis_function(self, i, x, q):
+        """Compute the ith basis function for the bspline representation evaluated at positions x.
+
+        Args:
+            i (int): The basis function to evaluate.
+
+            x (array_like): The points to evaluate the basis function at.
+
+            q (int): The derivative of the basis function to evaluate.
+
+        Returns:
+             basis_eval (array_like): The derivative of the ith basis function evaluated at points x.
+
+        """
+        c = np.zeros(self.K)
+        c[i] += 1
+        return splev(x, (self.knots, c, self.order - 1), der=q)
+
+    def _evaluate_basis(self, x, q):
+        """"Evaluate the qth derivative of all basis functions at locations x for the B-spline basis system.
+
+        Args:
+            x (np.ndarray): Locations to evaluate basis function at.
+
+            q (int): The order of the derivative to take of the basis functions.
+
+        Returns:
+            (np.ndarray): A :math:`n \\times K` matrix with :math:`k^\\text{th}` columns corresponding to the qth
+                derivative of the :math:`k^\\text{th}` basis functions evaluated at locations `x` of length :math:`n`.
+
+        Raises:
+            ValueError: If the order of derivative is greater than or equal to the order of the B-spline basis system.
+
+        """
+        if q >= self.order:
+            raise ValueError("The order of derivative must be less than the order of the B-spline system.")
+        return np.array([self._bspline_basis_function(i, x, q) for i in np.arange(self.K)]).T
+
+    def penalty(self, q, k=12):
+        """Calculate the qth order penalty matrix for the basis system.
+
+        The form of the penalty matrix is given by:
+
+        .. math::
+            P = [p_{kl}]
+
+        .. math::
+            p_{kl} = \int B_k^{(q)}(t) B_l^{(q)}(t)dt
+
+        where :math:`B_k` is the :math:`k^\\text{th}` basis function. In the case where the period of the basis system
+        is equal to the length of the domain we can analytically calculate the above, otherwise we use an romberg
+        numerical approximation to the integral which is controlled by parameter ``k``.
+
+        Args:
+            q (int): The order of the derivative of the penalty matrix.
+
+            k (int, Optional): Number of samples for romberg integration calculated by :math:`2^k + 1`. Defaults to 12.
+
+        Returns:
+            (np.ndarray): A :math:`K \\times K` matrix with elements given by :math:`p_{kl}`.
+
+        Raises:
+            ValueError: If order of derivative for the penalty is greater than or equal to the order of the B-spline
+                basis functions.
+
+        """
+        x = np.linspace(*self.domain, 2 ** k + 1)
+        dx = np.divide(np.diff(self.domain), 2 ** k)
+        phi_mat = self(x, q)
+        cross_phi_mat = np.einsum('ij, ik -> ijk', phi_mat, phi_mat)
+
+        integrals = []
+        for i in np.arange(self.K):
+            integrals.append([
+                romb(y=cross_phi_mat[:, i, j], dx=dx, axis=0) for j in np.arange(self.K)])
+        return np.squeeze(np.stack(integrals))
