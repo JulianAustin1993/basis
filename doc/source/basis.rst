@@ -19,3 +19,9 @@ Exponential
 .. autoclass:: basis.basis.Exponential
    :members:
    :show-inheritance:
+
+Fourier
+******************
+.. autoclass:: basis.basis.Fourier
+   :members:
+   :show-inheritance:

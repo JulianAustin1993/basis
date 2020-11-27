@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from basis import Monomial, Exponential
+from basis import Monomial, Exponential, Fourier
 
 
 class TestMonomial:
@@ -60,3 +60,48 @@ class TestExponential:
                                            360092.6190,
                                            1268666.8298,
                                            4267322.1004]))
+
+
+class TestFourier:
+    def test_K(self):
+        K = 6
+        domain = (0, 1)
+        period = 1.0
+        with pytest.raises(ValueError):
+            Fourier(domain, K, period)
+        assert Fourier(domain, 5, period).K == 5
+
+    def test_period(self):
+        K = 5
+        domain = (0, 1)
+        period = -1.0
+        with pytest.raises(ValueError):
+            Fourier(domain, K, period)
+        assert Fourier(domain, K, 1.0).period == 1.0
+
+    def test_evaluation(self):
+        K = 5
+        domain = (0, 2)
+        period = 2.0
+        bs = Fourier(domain, K, period)
+        x = np.linspace(*domain, 5)
+        assert np.allclose(bs(x, 1)[:, 2], np.array([0.0,
+                                                     -3.141593,
+                                                     0.0,
+                                                     3.141593,
+                                                     0.0]))
+
+    def test_penalty_analytic(self):
+        K = 5
+        domain = (-1, 1)
+        period = 2.0
+        bs = Fourier(domain, K, period)
+        assert np.allclose(np.diag(bs.penalty(2)), np.array([0.0, 97.40909, 97.40909, 1558.545, 1558.545]))
+
+    def test_penalty_numeric(self):
+        K = 5
+        domain = (-1, 1)
+        period = 1.999
+        bs = Fourier(domain, K, period)
+        bs2 = Fourier(domain, K, 2)
+        assert np.sum((bs.penalty(1, 12) - bs2.penalty(1)) ** 2) < 0.1

@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 
 import numpy as np
+from scipy.integrate import romb
 
 
 def default_knots(m, K, domain):
@@ -18,8 +19,8 @@ def default_knots(m, K, domain):
 
     """
     L = K - m
-    tau = np.linspace(*domain, L+2)
-    return np.pad(tau, (m-2, m-2), 'edge')
+    tau = np.linspace(*domain, L + 2)
+    return np.pad(tau, (m - 2, m - 2), 'edge')
 
 
 class Basis(ABC):
@@ -322,7 +323,7 @@ class Exponential(Basis):
             P = [p_{kl}]
 
         .. math::
-            p_{kl} = \int B_k^{(q)}(t) B_l^{(q)}(t)dt
+            p_{kl} = \int \\theta_k^q \\theta_l^q B_k(t) B_l(t)dt
 
         where :math:`B_k` is the :math:`k^\\text{th}` basis function.
 
@@ -335,17 +336,154 @@ class Exponential(Basis):
             (np.ndarray): A :math:`K \\times K` matrix with elements given by :math:`p_{kl}`.
 
         """
-        inner_product = np.zeros((self.K, self.K))
-        for i in np.arange(1, self.K):
-            for j in np.arange(i, self.K):
-                rate_i = self.theta[i]
-                rate_j = self.theta[j]
-                rate_sum = rate_i + rate_j
-                if rate_sum != 0:
-                    inner_product[i, j] = (((rate_i * rate_j) ** q) / rate_sum) * (
-                            np.exp(rate_sum * self.domain[1]) - np.exp(rate_sum * self.domain[0]))
-                else:
-                    if q == 0:
-                        inner_product[i, j] = np.diff(self.domain)
-                inner_product[j, i] = inner_product[i, j]
+        rs = np.add.outer(self.theta, self.theta)
+        P = np.divide(np.outer(self.theta, self.theta) ** q, rs, np.zeros((self.K, self.K)), where=rs != 0) * (
+                np.exp(rs * self.domain[1]) - np.exp(rs * self.domain[0]))
+        if q == 0:
+            P[rs == 0] = 0
+        return P
+
+
+class Fourier(Basis):
+    """Representation of the univariate fourier basis system.
+
+    Basis system is specified as the collection :math:`\{B_k\}_{k=1}^K` where:
+
+    .. math::
+        B_0(t) =  \\sqrt{|T|}^{-1}
+
+    .. math::
+        B_{2r-1}(t) = \\sqrt{ 0.5|T|}^{-1} \\sin ( \omega \pi r t )
+
+    .. math::
+        B_{2r}(t) = \\sqrt{ 0.5|T|}^{-1} \\cos ( \omega \pi r t )
+
+    where :math:`\omega` is :math:`2\pi` divided by the period of the basis.
+
+    Attributes:
+        domain (tuple):  The domain of the basis system specified by the lower and upper bound of the system.
+
+        K (int): Number of basis functions to use in the basis system.
+
+        period: (float): The period of the periodic fourier functions.
+
+    """
+
+    def __init__(self, domain, K, period=None):
+        """Inits the fourier basis system.
+
+        Args:
+             domain (tuple):  The domain of the basis system specified by the lower and upper bound of the system.
+
+            K (int): Number of basis functions to use in the basis system. Must be odd and greater than one.
+
+            period: (float, Optional): The period of the periodic fourier functions. Defaults to the length of the
+                domain. Must be positive.
+
+        Raises:
+            ValueError: If K is not odd or greater than one.
+
+        """
+
+        if not (K % 2 != 0 and K > 1):
+            raise ValueError('K must be odd and greater than one.')
+        super().__init__(domain, K)
+        self.period = period if period is not None else float(np.diff(self.domain))
+
+    @property
+    def period(self):
+        """Getter for the period attribute
+
+        """
+
+        return self.__period
+
+    @period.setter
+    def period(self, period):
+        """Setter for the period attribute.
+
+        Args:
+            period (float): The period of the periodic fourier functions. Defaults to the length of the domain.
+
+        Raises:
+            ValueError: If period is not positive.
+
+        """
+
+        if period <= 0:
+            raise ValueError('Period must be positive')
+        self.__period = period
+
+    def _evaluate_basis(self, x, q):
+        """"Evaluate the qth derivative of all basis functions at locations x for the Fourier basis system.
+
+        Args:
+            x (np.ndarray): Locations to evaluate basis function at.
+
+            q (int): The order of the derivative to take of the basis functions.
+
+        Returns:
+            (np.ndarray): A :math:`n \\times K` matrix with :math:`k^\\text{th}` columns corresponding to the qth
+                derivative of the :math:`k^\\text{th}` basis functions evaluated at locations `x` of length :math:`n`.
+
+        """
+
+        omega = 2 * np.pi / self.period
+        r = np.arange((self.K + 1) // 2)
+        c = np.exp(1j * np.outer(x, r * omega))
+        c *= np.outer(np.ones(len(x)), (-1) ** (q // 2) * (np.arange((self.K + 1) // 2) * omega) ** q)
+        if q % 2 == 0:
+            B = np.concatenate([c.T[0].real[:, np.newaxis] / np.sqrt(2)] + [
+                np.concatenate([c[:, i].imag[:, np.newaxis], c[:, i].real[:, np.newaxis]], axis=-1) for i in
+                np.arange(1, c.shape[-1])], axis=-1)
+        else:
+            B = np.concatenate([c.T[0].real[:, np.newaxis] / np.sqrt(2)] + [
+                np.concatenate([c[:, i].real[:, np.newaxis], -1.0 * c[:, i].imag[:, np.newaxis]], axis=-1) for i in
+                np.arange(1, c.shape[-1])], axis=-1)
+        return B / np.sqrt(self.period / 2)
+
+    def penalty(self, q, k=12):
+        """Calculate the qth order penalty matrix for the basis system.
+
+        The form of the penalty matrix is given by:
+
+        .. math::
+            P = [p_{kl}]
+
+        .. math::
+            p_{kl} = \int B_k^{(q)}(t) B_l^{(q)}(t)dt
+
+        where :math:`B_k` is the :math:`k^\\text{th}` basis function. In the case where the period of the basis system
+        is equal to the length of the domain we can analytically calculate the above, otherwise we use an romberg
+        numerical approximation to the integral which is controlled by parameter ``k``.
+
+        Args:
+            q (int): The order of the derivative of the penalty matrix.
+
+            k (int, Optional): Number of samples for romberg integration calculated by :math:`2^k + 1`. Defaults to 12.
+
+        Returns:
+            (np.ndarray): A :math:`K \\times K` matrix with elements given by :math:`p_{kl}`.
+
+        """
+        if not np.isclose(self.period, np.diff(self.domain)):
+            x = np.linspace(*self.domain, 2 ** k + 1)
+            dx = np.divide(np.diff(self.domain), 2 ** k)
+            phi_mat = self(x, q)
+            cross_phi_mat = np.einsum('ij, ik -> ijk', phi_mat, phi_mat)
+            integrals = []
+            for i in np.arange(self.K):
+                integrals.append([romb(y=cross_phi_mat[:, i, j], dx=dx, axis=0) for j in np.arange(self.K)])
+            inner_product = np.squeeze(np.stack(integrals))
+        else:
+            omega = 2 * np.pi / self.period
+            inner_prod_diag = np.zeros(self.K)
+            if q == 0:
+                inner_prod_diag[0] = self.period / 2.0
+            index_o = np.arange(1, self.K - 1, 2)
+            index_e = index_o + 1
+            fac = (self.period / 2.0) * (index_e * omega / 2.0) ** (2 * q)
+            inner_prod_diag[index_e] = fac
+            inner_prod_diag[index_o] = fac
+            inner_product = np.diag(inner_prod_diag * 2 / self.period)
         return inner_product
